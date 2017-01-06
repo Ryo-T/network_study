@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <string.h>
 
-#define MSGSIZE 110
+#define MSGSIZE 11
 #define KYE 100
 
 
@@ -61,10 +61,10 @@ int add_msglist(struct msglist *front,void *m,uint16_t len,uint16_t lid){
 	//memset(ml->data, '\0', MSGSIZE+1);
 	memcpy(ml->data,m,len);//メモリのコピー
 
-	//printf("id=%u\n",(uint16_t)ml->id);
-	//printf("size=%u\n",(uint16_t)ml->length);
-	//printf("data = \n%s\n",front->next->data);
-	//printf("p = %d\n",(int)front);
+	printf("id=%u\n",(uint16_t)ml->id);
+	printf("size=%u\n",(uint16_t)ml->length);
+	printf("data = \n%s\n",front->next->data);
+	printf("p = %d\n",(int)front);
 
 	return 1;
 
@@ -149,9 +149,9 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 		printf("NULL\n");
 
 
-	printf("hdr->data = %d\n",(int)sizeof(head->next->data));
-	printf("hdr->data = %s\n",head->next->data);
-	printf("head = %d\n",(int)head);
+	//printf("hdr->data = %d\n",(int)sizeof(head->next->data));
+	//printf("hdr->data = %s\n",head->next->data);
+	//printf("head = %d\n",(int)head);
 
 	//memset(b, '*', MSGSIZE+1);
 	//printf("%s\n",b);
@@ -380,17 +380,21 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 }
 
 // get file data size
-int get_file_size(const char *file[]){
-	fpos_t fsize = 0;
+long get_file_size(const char *file[]){
+	fpos_t fsize;
+	long sz = 0;
 
 	FILE *fp = fopen(file,"rb"); 
- 
+
 	fseek(fp,0,SEEK_END); 
-	fgetpos(fp,&fsize); 
- 
+//	fgetpos(fp,&fsize); 
+	sz = ftell(fp);
+
+	printf("FILESIZE = %lo\n",sz);
+
 	fclose(fp);
  
-	return fsize;
+	return sz;
 }
 
 
@@ -406,7 +410,8 @@ int main(){
 	int err = 0;
 	FILE *fp;
 	char *file = "./sample2.txt";
-	int flen = 0;
+	long flen = 0;
+
 
 // get file data into the buffer
 //--------------------------------------
@@ -438,8 +443,9 @@ int main(){
 
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(8000);
-	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	addr.sin_addr.s_addr = inet_addr("192.168.10.164");
 
+       printf("debug\n");
 
 	err = sendst(sock,buf,sizeof(buf),0,(struct sockaddr *)&addr, sizeof(addr));
 
