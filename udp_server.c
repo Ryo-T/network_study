@@ -3,8 +3,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+
+#define PORT 8000
+
+
 #define BUFFERSIZE 1024*1024
-#define MSGSIZE 110
+#define MSGSIZE 11
+
 
 void *memset(void *buf, int ch, size_t n);
 int close(int fd);
@@ -12,14 +17,17 @@ int close(int fd);
 struct msglist{
 	struct msglist *next;
 	struct msglist *back;
-	uint16_t id;
+	uint32_t id;
+	uint16_t key;
 	uint16_t length;
 	char data[MSGSIZE+1];
 };
 
+/*
 struct connection_hdr{
 	uint16_t key;
 };
+*/
 
 void free_msglist(struct msglist *ml){
 	struct msglist *p = NULL;
@@ -50,13 +58,16 @@ struct msglist *rebuild_msglist(char *buf){
 	ml->next = NULL;
 	ml->back = NULL;
 
-	memcpy(&ml->id,p,sizeof(uint16_t));
+	memcpy(&ml->id,p,sizeof(uint32_t));
+	p = p + sizeof(uint32_t);
+	memcpy(&ml->key,p,sizeof(uint16_t));
 	p = p + sizeof(uint16_t);
 	memcpy(&ml->length,p,sizeof(uint16_t));
 	p = p + sizeof(uint16_t);
 	memcpy(ml->data,p,ml->length);
 
 	printf("id = %u\n",ml->id);
+	printf("key = %u\n",ml->key);
 	printf("length = %u\n",ml->length);
 	printf("data = %s\n",ml->data);
 
@@ -86,7 +97,7 @@ struct msglist *accept_recvst(int fd,unsigned int flag){
 		return NULL;
 	}
 
-	printf("key = %u\n",(uint16_t)*ml->data);
+	printf("key = %u\n",(uint16_t)ml->key);
 
 	return ml;
 }
@@ -110,7 +121,7 @@ int do_recvst(int fd,struct msglist *front,unsigned int flag){
 		return 0;
 	}
 
-	if(ml->id==(uint16_t)~0){
+	if(ml->id==(uint32_t)~0){
 		printf("close\n");
 		return 0;
 	}
@@ -146,8 +157,6 @@ int collect_datas(void *ubuf,struct msglist *head,size_t bufsize){
 
 	}while(np!=NULL);
 
-	printf("ubuf:%d\n",ubuf );
-
 	return size;
 
 }
@@ -176,7 +185,6 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 
 	msgsize = collect_datas(ubuf,head,size);
 
-	printf("buf:%d\n",ubuf );
 
 	free_msglist(head);
 
@@ -198,7 +206,7 @@ int main(){
 	}
 
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(8000);
+	addr.sin_port = htons(PORT);
 	addr.sin_addr.s_addr = INADDR_ANY;
 
 	err = bind(sock, (struct sockaddr *)&addr,sizeof(addr));

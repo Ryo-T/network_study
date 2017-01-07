@@ -6,8 +6,19 @@
 #include <sys/stat.h>
 #include <string.h>
 
+#define SENDTOADDR "127.0.0.1"
+#define PORT 8000
+
+
 #define MSGSIZE 11
 #define KYE 100
+
+#define MAXIF 10 // default 10
+#define HOW_MANY_IF 1
+#define IF_LIST "lo0"
+//#define IF_LIST "eth33","eth34"
+#define WORDCOUNT 3
+//#define WORDCOUNT 5,5
 
 
 in_addr_t inet_addr(const char *cp);
@@ -17,14 +28,50 @@ int close(int fd);
 struct msglist{
 	struct msglist *next;
 	struct msglist *back;
-	uint16_t id;
+	uint32_t id;
+	uint16_t key;
 	uint16_t length;
 	char data[MSGSIZE+1];
 };
 
+struct socklist{
+	int sock;
+	struct sockaddr *addr;
+	int addr_len;
+};
+
+/*
 struct connection_hdr{
 	uint16_t key;
 };
+*/
+
+void add_socklist(struct socklist *sl){
+	struct sockaddr_in addr[HOW_MANY_IF];
+	int i;
+
+	for(i = 0; i < HOW_MANY_IF; i++){
+
+		sl[i].sock = socket(AF_INET, SOCK_DGRAM, 0);
+		if(!sl->sock){
+			printf("sock err\n");
+			return;
+		}
+
+		addr[i].sin_family = AF_INET;
+		addr[i].sin_port = htons(PORT);
+		addr[i].sin_addr.s_addr = inet_addr(SENDTOADDR);
+
+		sl[i].addr = (struct sockaddr *)&addr;
+		sl[i].addr_len = sizeof(addr[i]);
+
+		printf("addr %u\n",inet_addr(SENDTOADDR));
+
+	}
+
+
+	return;
+}
 
 
 
@@ -33,17 +80,19 @@ void init_list_head(struct msglist *ml){
 	ml->next = NULL;
 	ml->back = NULL;
 	ml->id = 0;
-	ml->length = sizeof(uint16_t);
+	ml->key = KYE;
+//	ml->length = sizeof(uint16_t);
+	ml->length = 0;
 
-	memset(ml->data, '\0', MSGSIZE+1);
-	struct connection_hdr chdr;
-	chdr.key = KYE;
-	memcpy(ml->data,&chdr.key,sizeof(uint16_t));	
+//	memset(ml->data, '\0', MSGSIZE+1);
+//	struct connection_hdr chdr;
+//	chdr.key = KYE;
+//	memcpy(ml->data,&chdr.key,sizeof(uint16_t));	
 
 	return;
 }
 
-int add_msglist(struct msglist *front,void *m,uint16_t len,uint16_t lid){
+int add_msglist(struct msglist *front,void *m,uint16_t len,uint32_t lid){
 	struct msglist *ml;
 //	struct data_hdr *h;
 	
@@ -56,15 +105,17 @@ int add_msglist(struct msglist *front,void *m,uint16_t len,uint16_t lid){
 	front->next = ml;
 	ml->next = NULL;
 	ml->id = lid;
+	ml->key = 0;
 	ml->length = len;
 
 	//memset(ml->data, '\0', MSGSIZE+1);
 	memcpy(ml->data,m,len);//メモリのコピー
 
-	printf("id=%u\n",(uint16_t)ml->id);
+	printf("id=%u\n",(uint32_t)ml->id);
+	printf("key=%u\n",(uint16_t)ml->key);
 	printf("size=%u\n",(uint16_t)ml->length);
-	printf("data = \n%s\n",front->next->data);
-	printf("p = %d\n",(int)front);
+	printf("*****data*****\n%s\n",front->next->data);
+	printf("front *p = %d\n",(int)front);
 
 	return 1;
 
@@ -73,14 +124,14 @@ int add_msglist(struct msglist *front,void *m,uint16_t len,uint16_t lid){
 
 int create_msglist(struct msglist *head,void *msg,size_t len){
 	int err = 0;
-	uint16_t lid = 1;
+	uint32_t lid = 1;
 	struct msglist *ml = head;
 	char buf[MSGSIZE+1];
 	char *bp = msg;
 	char *bp2 = bp + MSGSIZE;
-	char b[MSGSIZE+1];
+//	char b[MSGSIZE+1];
 
-	memset(b, '\0', MSGSIZE+1);
+	memset(buf, '\0', MSGSIZE+1);
 
 	do{
 
@@ -94,7 +145,9 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 				return 0;
 			}
 
-			//printf("1:len=%d\n",MSGSIZE);
+			printf("1:len=%d\n",len);
+			printf("1:data = %s\n",buf);
+			printf("2:len = %d\n",(int)bp2-(int)msg);
 
 			bp = bp2;
 			bp2 = bp2 + MSGSIZE;
@@ -107,11 +160,11 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 			ml = ml->next;
 			lid ++;
 
-			memcpy(b,head->next->data,MSGSIZE);//メモリのコピー
+			//memcpy(b,head->next->data,MSGSIZE);//メモリのコピー
 
 		}else{
 			
-			memset(b, '\0', MSGSIZE+1);
+			memset(buf, '\0', MSGSIZE+1);
 
 			int memlen = len-((int)bp-(int)msg);
 
@@ -123,7 +176,7 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 				return 0;
 			}
 
-			//printf("2:len=%d\n",memlen);
+			printf("2:len=%d\n",memlen);
 
 			
 			bp = bp2;
@@ -139,7 +192,7 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 
 			//memset(b, '\0', MSGSIZE);
 
-			memcpy(b,head->next->data,memlen);//メモリのコピー
+			//memcpy(b,head->next->data,memlen);//メモリのコピー
 				
 		}
 
@@ -164,7 +217,9 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 void create_packet(char *buf,struct msglist *ml){
 	char *bp = buf;
 
-	memcpy(bp,&ml->id,sizeof(uint16_t));
+	memcpy(bp,&ml->id,sizeof(uint32_t));
+	bp = bp + sizeof(uint32_t);
+	memcpy(bp,&ml->key,sizeof(uint16_t));
 	bp = bp + sizeof(uint16_t);
 	memcpy(bp,&ml->length,sizeof(uint16_t));
 	bp = bp + sizeof(uint16_t);
@@ -175,10 +230,11 @@ void create_packet(char *buf,struct msglist *ml){
 
 int connect_sendst(int fd,struct msglist *ml, 
 				struct sockaddr *addr, int addr_len){
-	int hsize = sizeof(uint16_t)*2;// header size
-	int chsize = sizeof(uint16_t);// connection header size
+	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;// header size
+//	int chsize = sizeof(uint16_t);// connection header size
 	int err = 0;
-	char buf[hsize + chsize + 1];
+//	char buf[hsize + chsize + 1];
+	char buf[hsize + 1];
 //	char *cp = buf;
 
 	if(!ml){
@@ -213,7 +269,7 @@ int connect_sendst(int fd,struct msglist *ml,
 int do_sendst(int fd,struct msglist *ml, 
 				struct sockaddr *addr, int addr_len){
 	int err = 0;
-	int hsize = sizeof(uint16_t)*2;
+	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
 	int mlen = 0;
 	struct msglist *p = ml;
 	char buf[hsize+MSGSIZE+1];
@@ -275,12 +331,13 @@ int do_sendst(int fd,struct msglist *ml,
 
 int close_sendst(int fd, struct sockaddr *addr, int addr_len){
 	int err = 0;
-	int hsize = sizeof(uint16_t)*2;
+	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
 	char buf[hsize];
 	char *cp = buf;
 
 	struct msglist ml;
 	ml.id = ~0;
+	ml.key = 0;
 	ml.length = 0;
 
 	memset(buf,'\0',sizeof(buf));
@@ -323,7 +380,11 @@ void free_msglist(struct msglist *ml){
 int sendst(int fd, void *msg, size_t len, unsigned int flags,
 							 struct sockaddr *addr, int addr_len){
 	int err = 0;
+	char *dev[HOW_MANY_IF] = {IF_LIST};
+	int wcount[HOW_MANY_IF] = {WORDCOUNT};
 	struct msglist *ml;
+	struct socklist sl[MAXIF];
+
 
 	/* リスト先頭の記憶領域の確保 */
 	if ((ml = (struct msglist *) malloc(sizeof(struct msglist))) == NULL) {
@@ -333,31 +394,60 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 	init_list_head(ml);
 
-/*
-	// init list head
-	ml->next = NULL;
-	ml->back = NULL;
-	ml->id = 0;
-	ml->length = 0;
-*/
-
-
-	printf("key = %d\n",(int)*ml->data);
+	printf("key = %u\n",ml->key);
 
 	err = create_msglist(ml,msg,len);
-
 	if(!err){
 		printf("create_msglist err\n");
 		return 0;
 	}
 
-/*
-	char b[MSGSIZE+1];
-	memset(b, '\0', MSGSIZE+1);
-	memcpy(b,ml->next->data,MSGSIZE);
-	printf("%s\n",b);
-*/
 
+	if(HOW_MANY_IF==0){
+		
+		sl[0].sock = fd;
+		sl[0].addr = addr;
+		sl[0].addr_len = addr_len;
+
+	}else{
+
+//		add_socklist(sl);
+
+		int i;
+
+		for(i = 0; i < HOW_MANY_IF; i++){
+
+			sl[i].sock = socket(AF_INET, SOCK_DGRAM, 0);
+			if(!sl->sock){
+				printf("sock err\n");
+				return 0;
+			}
+
+			sl[i].addr = addr;
+			sl[i].addr_len = addr_len;
+
+//			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
+
+			printf("dev:%s size:%u\n",dev[i],wcount[i]);
+
+		}
+
+	}
+
+
+
+
+	err = connect_sendst(sl[0].sock, ml, sl[0].addr, sl[0].addr_len);
+	if(!err)return err;
+
+	err = do_sendst(sl[0].sock, ml->next, sl[0].addr, sl[0].addr_len);
+	if(!err)return err;
+
+	err = close_sendst(sl[0].sock, sl[0].addr, sl[0].addr_len);
+	if(!err)return err;
+
+
+/*
 	err = connect_sendst(fd, ml, addr, addr_len);
 	if(!err)return err;
 
@@ -366,7 +456,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 	err = close_sendst(fd, addr, addr_len);
 	if(!err)return err;
-
+*/
 
 //	err = sendto(fd, msg, len, 0, addr, addr_len);
 
@@ -442,8 +532,8 @@ int main(){
 	}
 
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(8000);
-	addr.sin_addr.s_addr = inet_addr("192.168.10.164");
+	addr.sin_port = htons(PORT);
+	addr.sin_addr.s_addr = inet_addr(SENDTOADDR);
 
        printf("debug\n");
 
