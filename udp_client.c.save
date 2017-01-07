@@ -10,11 +10,11 @@
 #define PORT 8000
 
 
-#define MSGSIZE 1000
+#define MSGSIZE 11
 #define KYE 100
 
 #define MAXIF 10 // default 10
-#define HOW_MANY_IF 2
+#define HOW_MANY_IF 1
 //#define IF_LIST "lo0"
 #define IF_LIST "ens33","ens38"
 //#define WORDCOUNT 3
@@ -87,7 +87,7 @@ void init_list_head(struct msglist *ml){
 //	memset(ml->data, '\0', MSGSIZE+1);
 //	struct connection_hdr chdr;
 //	chdr.key = KYE;
-//	memcpy(ml->data,&chdr.key,sizeof(uint16_t));
+//	memcpy(ml->data,&chdr.key,sizeof(uint16_t));	
 
 	return;
 }
@@ -95,7 +95,7 @@ void init_list_head(struct msglist *ml){
 int add_msglist(struct msglist *front,void *m,uint16_t len,uint32_t lid){
 	struct msglist *ml;
 //	struct data_hdr *h;
-
+	
 	/* リストの記憶領域の確保 */
 	if ((ml = (struct msglist *) malloc(sizeof(struct msglist))) == NULL) {
 		printf("malloc error 2\n");
@@ -178,7 +178,6 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 
 			printf("2:len=%d\n",memlen);
 
-
 			bp = bp2;
 			bp2 = bp2 + MSGSIZE;
 
@@ -228,7 +227,8 @@ void create_packet(char *buf,struct msglist *ml){
 	return;
 }
 
-int connect_sendst(struct socklist *sl,struct msglist *ml){
+int connect_sendst(int fd,struct msglist *ml,
+				struct sockaddr *addr, int addr_len){
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;// header size
 //	int chsize = sizeof(uint16_t);// connection header size
 	int err = 0;
@@ -254,7 +254,7 @@ int connect_sendst(struct socklist *sl,struct msglist *ml){
 	memcpy(cp,ml->data,connection_hdr_size);
 	*/
 
-	err = sendto(sl[0].sock, buf, sizeof(buf), 0, sl[0].addr, sl[0].addr_len);
+	err = sendto(fd, buf, sizeof(buf), 0, addr, addr_len);
 
 	if(!err){
 		printf("connection err 2\n");
@@ -265,13 +265,13 @@ int connect_sendst(struct socklist *sl,struct msglist *ml){
 
 }
 
-int do_sendst(struct socklist *sl,struct msglist *ml){
+int do_sendst(int fd,struct msglist *ml,
+				struct sockaddr *addr, int addr_len){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
 	int mlen = 0;
 	struct msglist *p = ml;
 	char buf[hsize+MSGSIZE+1];
-	int if_num = 0;
 
 //	printf("aaa\n");
 
@@ -308,7 +308,7 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 		printf("mlen:%d\n",mlen);
 		*/
 
-		err = sendto(sl[if_num].sock, buf, mlen, 0, sl[if_num].addr, sl[if_num].addr_len);
+		err = sendto(fd, buf, mlen, 0, addr, addr_len);
 
 		if(!err){
 			printf("do_send err 2\n");
@@ -322,21 +322,13 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 
 		p = p->next;
 
-//if関連
-//---------------------------------------
-		if(HOW_MANY_IF!=0){
-			if_num = (if_num+1)%HOW_MANY_IF;
-		}
-		printf("IF = %d\n",if_num);
-//---------------------------------------
-
 	}
 
 	return 1;
 
 }
 
-int close_sendst(struct socklist *sl){
+int close_sendst(int fd, struct sockaddr *addr, int addr_len){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
 	char buf[hsize];
@@ -357,7 +349,7 @@ int close_sendst(struct socklist *sl){
 	cp = cp + sizeof(uint16_t);
 	memcpy(cp,ml->data,connection_hdr_size);
 */
-	err = sendto(sl[0].sock, buf, sizeof(buf), 0, sl[0].addr, sl[0].addr_len);
+	err = sendto(fd, buf, sizeof(buf), 0, addr, addr_len);
 
 	if(!err){
 		printf("close err \n");
@@ -444,14 +436,13 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 
 
-//	err = connect_sendst(sl[0].sock, ml, sl[0].addr, sl[0].addr_len);
-	err = connect_sendst(sl, ml);
+	err = connect_sendst(sl[0].sock, ml, sl[0].addr, sl[0].addr_len);
 	if(!err)return err;
 
-	err = do_sendst(sl,ml->next);
+	err = do_sendst(sl[0].sock, ml->next, sl[0].addr, sl[0].addr_len);
 	if(!err)return err;
 
-	err = close_sendst(sl);
+	err = close_sendst(sl[0].sock, sl[0].addr, sl[0].addr_len);
 	if(!err)return err;
 
 
@@ -485,13 +476,13 @@ long get_file_size(const char *file[]){
 	FILE *fp = fopen(file,"rb");
 
 	fseek(fp,0,SEEK_END);
-//	fgetpos(fp,&fsize); 
+//	fgetpos(fp,&fsize);
 	sz = ftell(fp);
 
 	printf("FILESIZE = %lo\n",sz);
 
 	fclose(fp);
-
+ 
 	return sz;
 }
 
