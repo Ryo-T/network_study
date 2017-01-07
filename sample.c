@@ -19,9 +19,11 @@ int main(){
 		printf("n = %s\n",n[i]);
 	}
 
-	int k[3];
-	f(k);
-	printf("%d,%d,%d\n",k[0],k[1],k[2]);
+	int k = 0;
+	for(i=0;i<5;i++){
+		printf("k = %d\n",k);	
+		k = (k+1)%1;
+	}
 
 	return 0;
 }

@@ -8,7 +8,7 @@
 
 
 #define BUFFERSIZE 1024*1024
-#define MSGSIZE 11
+#define MSGSIZE 1000
 
 
 void *memset(void *buf, int ch, size_t n);
