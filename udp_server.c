@@ -7,14 +7,14 @@
 
 #define PORT 8000
 #define CPORT 8100
-#define CADDRESS "127.0.0.1"
+#define CADDRESS "192.168.10.129"
 
 #define BUFFERSIZE 1024*1024
-#define MSGSIZE 1100
+#define MSGSIZE 110
 #define KYE 200
 
-#define TIMER 1//1秒
-#define NANOTIMER 0//ナノ秒
+#define TIMER 0//1秒
+#define NANOTIMER 10//ナノ秒
 
 
 void *memset(void *buf, int ch, size_t n);
@@ -230,7 +230,7 @@ int rq_resendst(struct socklist *sl,uint8_t *ack_arr,uint32_t ids){
 
 		if(err<0){
 			printf("Re sendto err\n");
-			return err;
+//			return err;
 		}
 
 		p = p + sizeof(uint8_t);
