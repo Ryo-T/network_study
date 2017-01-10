@@ -4,22 +4,25 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <string.h>
 
-#define SENDTOADDR "192.168.3.8"
+#define SENDTOADDR "127.0.0.1"
 #define PORT 8000
+#define CPORT 8100
 
-
-#define MSGSIZE 1000
+#define MSGSIZE 1100
 #define KYE 100
 
 #define MAXIF 10 // default 10
-#define HOW_MANY_IF 2
+#define HOW_MANY_IF 0
 //#define IF_LIST "lo0"
 #define IF_LIST "ens33","ens38"
 //#define WORDCOUNT 3
 #define WORDCOUNT 5,5
 
+#define TIMER 1//1秒
+#define NANOTIMER 0//ナノ秒
 
 in_addr_t inet_addr(const char *cp);
 int close(int fd);
@@ -46,6 +49,7 @@ struct connection_hdr{
 };
 */
 
+/*
 void add_socklist(struct socklist *sl){
 	struct sockaddr_in addr[HOW_MANY_IF];
 	int i;
@@ -72,22 +76,54 @@ void add_socklist(struct socklist *sl){
 
 	return;
 }
+*/
+struct socklist set_saddr(void){
+	int err = 0;
+	struct socklist sl;
+	static struct sockaddr_in addr2;
+
+	sl.sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if(sl.sock<0){
+		printf("sl.sock err\n");
+		return sl;
+	}
+
+	addr2.sin_family = AF_INET;
+	addr2.sin_port = htons(CPORT);
+	addr2.sin_addr.s_addr = INADDR_ANY;
+
+ 	sl.addr = (struct sockaddr *)&addr2;
+ 	sl.addr_len = sizeof(addr2);
+
+ 	err = bind(sl.sock, (struct sockaddr *)&addr2,sizeof(addr2));
+
+	if(err<0){
+		printf("bind err\n");
+		return sl;
+	}
+
+ 	return sl;
+}
+
+void init_list_head(struct msglist *ml,size_t len){
+
+	int ids = (len-2)/MSGSIZE + 1;
+	printf("ids = %d\n",ids);
 
 
-
-void init_list_head(struct msglist *ml){
 	// init list head
 	ml->next = NULL;
 	ml->back = NULL;
 	ml->id = 0;
 	ml->key = KYE;
-//	ml->length = sizeof(uint16_t);
-	ml->length = 0;
+	ml->length = sizeof(uint32_t);
+//	ml->length = 0;
 
-//	memset(ml->data, '\0', MSGSIZE+1);
+	memset(ml->data, '\0', MSGSIZE+1);
 //	struct connection_hdr chdr;
 //	chdr.key = KYE;
 //	memcpy(ml->data,&chdr.key,sizeof(uint16_t));
+	memcpy(ml->data,&ids,sizeof(uint32_t));
 
 	return;
 }
@@ -147,7 +183,7 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 
 			printf("1:len=%d\n",len);
 			printf("1:data = %s\n",buf);
-			printf("2:len = %d\n",(int)bp2-(int)msg);
+			printf("1:len = %d\n",(int)bp2-(int)msg);
 
 			bp = bp2;
 			bp2 = bp2 + MSGSIZE;
@@ -166,7 +202,7 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 
 			memset(buf, '\0', MSGSIZE+1);
 
-			int memlen = len-((int)bp-(int)msg);
+			int memlen = len-((int)bp-(int)msg)-1;
 
 			memcpy(buf,bp,memlen);
 			err = add_msglist(head,buf,memlen,lid);
@@ -308,6 +344,8 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 		printf("mlen:%d\n",mlen);
 		*/
 
+		// id = 3のパケットをドロップ
+		if(p->id!=3&&p->id!=8)
 		err = sendto(sl[if_num].sock, buf, mlen, 0, sl[if_num].addr, sl[if_num].addr_len);
 
 		if(!err){
@@ -331,6 +369,94 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 //---------------------------------------
 
 	}
+
+	return 1;
+
+}
+
+// サーバープログラムと同じ
+struct msglist *rebuild_msglist(char *buf){
+	struct msglist *ml;
+	char *p = buf;
+
+	if ((ml = (struct msglist *) malloc(sizeof(struct msglist))) == NULL) {
+		printf("malloc error \n");
+		return 0;
+	}
+
+	ml->next = NULL;
+	ml->back = NULL;
+
+	memcpy(&ml->id,p,sizeof(uint32_t));
+	p = p + sizeof(uint32_t);
+	memcpy(&ml->key,p,sizeof(uint16_t));
+	p = p + sizeof(uint16_t);
+	memcpy(&ml->length,p,sizeof(uint16_t));
+	p = p + sizeof(uint16_t);
+	memcpy(ml->data,p,ml->length);
+
+	printf("id = %u\n",ml->id);
+	printf("key = %u\n",ml->key);
+	printf("length = %u\n",ml->length);
+	printf("data = %s\n",ml->data);
+
+	return ml;
+}
+
+int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml){
+	int err = 0;
+	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
+	struct timespec ts;
+	struct msglist *mlp;
+	struct msglist *p;
+	char recvbuf[MSGSIZE+1];
+	char sendbuf[hsize+MSGSIZE+1];
+
+	ts.tv_sec = TIMER;
+	ts.tv_nsec = NANOTIMER;
+
+	while(1){
+		p = ml;
+		memset(recvbuf,'\0',sizeof(recvbuf));
+		memset(sendbuf,'*',sizeof(sendbuf));
+
+		err = recvfrom (recvsl->sock, recvbuf, sizeof(recvbuf), 
+					MSG_DONTWAIT,recvsl->addr, &recvsl->addr_len);
+
+		if(err>0){
+			mlp = rebuild_msglist(recvbuf);
+
+			if(mlp->id==~0){
+				free(mlp);
+				break;
+			}
+
+			while(1){
+				if((uint32_t)*mlp->data==p->id){
+					create_packet(sendbuf,p);
+					err = sendto(sendsl[0].sock, sendbuf, sizeof(sendbuf), 0,
+											 sendsl[0].addr, sendsl[0].addr_len);
+					printf("Re:sendto = %d\n",err);
+					printf("re:id = %u\n",p->id);
+					printf("re:key = %u\n",p->key);
+					printf("re:length = %u\n",p->length);
+					printf("re:data = %s\n",p->data);
+
+					break;
+				}else if(p->next==NULL){
+					break;
+				}
+				printf("Re::id=%d\n",p->id);
+				p = p->next;
+			}
+
+			free(mlp);
+		}
+		nanosleep(&ts, NULL);
+
+	}
+
+	printf("end resend\n");
 
 	return 1;
 
@@ -399,7 +525,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 		return 0;
 	}
 
-	init_list_head(ml);
+	init_list_head(ml,len);
 
 	printf("key = %u\n",ml->key);
 
@@ -433,7 +559,9 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 			sl[i].addr = addr;
 			sl[i].addr_len = addr_len;
 
-			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
+
+			// MacOSだと使えないのでコメントアウト
+//			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
 
 			printf("dev:%s size:%u\n",dev[i],wcount[i]);
 
@@ -442,18 +570,29 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 	}
 
 
+	struct socklist rsl;// 受信用ソケットリスト
 
-
+	// コネクション開始
 //	err = connect_sendst(sl[0].sock, ml, sl[0].addr, sl[0].addr_len);
 	err = connect_sendst(sl, ml);
 	if(!err)return err;
 
+	// 送信開始
 	err = do_sendst(sl,ml->next);
 	if(!err)return err;
 
+	// 送信終了
 	err = close_sendst(sl);
 	if(!err)return err;
 
+	// 再送
+	rsl = set_saddr();
+	err = re_sendst(&rsl,sl,ml->next);
+	if(!err)return err;
+
+	// 最後closeパケット送らなくても大丈夫そう(?)
+//	err = close_sendst(sl);
+//	if(!err)return err;
 
 /*
 	err = connect_sendst(fd, ml, addr, addr_len);
@@ -471,6 +610,9 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 //	printf("sizeof(buf)=%d,\n%s\n",(int)sizeof(msg),(char *)msg);
 //	printf("len=%d,\n%s\n",len,(char *)msg);
+
+	close(sl[0].sock);
+	close(sl);
 
 	free_msglist(ml);
 
