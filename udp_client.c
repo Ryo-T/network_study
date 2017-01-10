@@ -11,18 +11,18 @@
 #define PORT 8000
 #define CPORT 8100
 
-#define MSGSIZE 1100
+#define MSGSIZE 110
 #define KYE 100
 
 #define MAXIF 10 // default 10
 #define HOW_MANY_IF 0
 //#define IF_LIST "lo0"
-#define IF_LIST "ens33","ens38"
+#define IF_LIST "ens38","ens33"
 //#define WORDCOUNT 3
 #define WORDCOUNT 5,5
 
-#define TIMER 1//1秒
-#define NANOTIMER 0//ナノ秒
+#define TIMER 0//1秒
+#define NANOTIMER 10//ナノ秒
 
 in_addr_t inet_addr(const char *cp);
 int close(int fd);
@@ -561,7 +561,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 
 			// MacOSだと使えないのでコメントアウト
-//			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
+			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
 
 			printf("dev:%s size:%u\n",dev[i],wcount[i]);
 
