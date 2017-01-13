@@ -7,13 +7,15 @@
 #include <sys/time.h>
 #include <string.h>
 
+// 送信先アドレスとポート
 #define SENDTOADDR "127.0.0.1"
 #define PORT 8000
 #define CPORT 8100
 
-#define MSGSIZE 110
+#define MSGSIZE 11
 #define KYE 100
 
+// インターフェース関連
 #define MAXIF 10 // default 10
 #define HOW_MANY_IF 0
 //#define IF_LIST "lo0"
@@ -21,7 +23,9 @@
 //#define WORDCOUNT 3
 #define WORDCOUNT 5,5
 
-#define TIMER 0//1秒
+// TIMEOUT関連
+#define TIMEOUT 500000000
+#define SECTIMER 0//1秒
 #define NANOTIMER 10//ナノ秒
 
 in_addr_t inet_addr(const char *cp);
@@ -43,40 +47,7 @@ struct socklist{
 	int addr_len;
 };
 
-/*
-struct connection_hdr{
-	uint16_t key;
-};
-*/
-
-/*
-void add_socklist(struct socklist *sl){
-	struct sockaddr_in addr[HOW_MANY_IF];
-	int i;
-
-	for(i = 0; i < HOW_MANY_IF; i++){
-
-		sl[i].sock = socket(AF_INET, SOCK_DGRAM, 0);
-		if(!sl->sock){
-			printf("sock err\n");
-			return;
-		}
-
-		addr[i].sin_family = AF_INET;
-		addr[i].sin_port = htons(PORT);
-		addr[i].sin_addr.s_addr = inet_addr(SENDTOADDR);
-
-		sl[i].addr = (struct sockaddr *)&addr;
-		sl[i].addr_len = sizeof(addr[i]);
-
-		printf("addr %u\n",inet_addr(SENDTOADDR));
-
-	}
-
-
-	return;
-}
-*/
+// サブソケットの生成
 struct socklist set_saddr(void){
 	int err = 0;
 	struct socklist sl;
@@ -105,34 +76,38 @@ struct socklist set_saddr(void){
  	return sl;
 }
 
+// メッセージリストの先頭(コネクションパケット)の作成
 void init_list_head(struct msglist *ml,size_t len){
 
+	// idの総数(送信するパケットの総数)の計算
 	int ids = (len-2)/MSGSIZE + 1;
-	printf("ids = %d\n",ids);
+	printf("max id = %d\n",ids);
 
 
-	// init list head
+	// msglistの初期化
 	ml->next = NULL;
 	ml->back = NULL;
 	ml->id = 0;
 	ml->key = KYE;
 	ml->length = sizeof(uint32_t);
-//	ml->length = 0;
 
+	// msaglistのデータ部にidの総数を挿入
 	memset(ml->data, '\0', MSGSIZE+1);
-//	struct connection_hdr chdr;
-//	chdr.key = KYE;
-//	memcpy(ml->data,&chdr.key,sizeof(uint16_t));
 	memcpy(ml->data,&ids,sizeof(uint32_t));
+
+	// 送信側のサブインターフェースの通知処理
+	//-------------------------------------
+
+	//-------------------------------------
 
 	return;
 }
 
+// 分割したデータをmsglistに追加
 int add_msglist(struct msglist *front,void *m,uint16_t len,uint32_t lid){
 	struct msglist *ml;
-//	struct data_hdr *h;
 
-	/* リストの記憶領域の確保 */
+	// リストの記憶領域の確保
 	if ((ml = (struct msglist *) malloc(sizeof(struct msglist))) == NULL) {
 		printf("malloc error 2\n");
 		return 0;
@@ -144,20 +119,19 @@ int add_msglist(struct msglist *front,void *m,uint16_t len,uint32_t lid){
 	ml->key = 0;
 	ml->length = len;
 
-	//memset(ml->data, '\0', MSGSIZE+1);
 	memcpy(ml->data,m,len);//メモリのコピー
 
-	printf("id=%u\n",(uint32_t)ml->id);
-	printf("key=%u\n",(uint16_t)ml->key);
-	printf("size=%u\n",(uint16_t)ml->length);
-	printf("*****data*****\n%s\n",front->next->data);
-	printf("front *p = %d\n",(int)front);
+	//printf("[add_msglist]:id=%u\n",(uint32_t)ml->id);
+	//printf("[add_msglist]:key=%u\n",(uint16_t)ml->key);
+	//printf("[add_msglist]:size=%u\n",(uint16_t)ml->length);
+	//printf("[add_msglist]:data\n%s\n",front->next->data);
+	//printf("[add_msglist]:front *p = %d\n",(int)front);
 
 	return 1;
 
 }
 
-
+// 分割したデータでmsglistを作る処理  *head にリストが全部ついてるはず
 int create_msglist(struct msglist *head,void *msg,size_t len){
 	int err = 0;
 	uint32_t lid = 1;
@@ -165,12 +139,12 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 	char buf[MSGSIZE+1];
 	char *bp = msg;
 	char *bp2 = bp + MSGSIZE;
-//	char b[MSGSIZE+1];
 
 	memset(buf, '\0', MSGSIZE+1);
 
 	do{
 
+		// 分割したデータがパケットの最大サイズと同じ時の処理
 		if((int)bp2-(int)msg<=len){
 
 			memcpy(buf,bp,MSGSIZE);
@@ -181,9 +155,8 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 				return 0;
 			}
 
-			printf("1:len=%d\n",len);
-			printf("1:data = %s\n",buf);
-			printf("1:len = %d\n",(int)bp2-(int)msg);
+			//printf("[create_msglist]1:len=%d\n",len);
+			//printf("[create_msglist]1:data = %s\n",buf);
 
 			bp = bp2;
 			bp2 = bp2 + MSGSIZE;
@@ -196,8 +169,7 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 			ml = ml->next;
 			lid ++;
 
-			//memcpy(b,head->next->data,MSGSIZE);//メモリのコピー
-
+		// 分割したデータがパケットの最大サイズより小さい時の処理
 		}else{
 
 			memset(buf, '\0', MSGSIZE+1);
@@ -212,7 +184,8 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 				return 0;
 			}
 
-			printf("2:len=%d\n",memlen);
+			//printf("[create_msglist]2:memlen=%d\n",memlen);
+			//printf("[create_msglist]2:data = %s\n",buf);
 
 
 			bp = bp2;
@@ -225,11 +198,6 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 
 			ml = ml->next;
 			lid ++;
-
-			//memset(b, '\0', MSGSIZE);
-
-			//memcpy(b,head->next->data,memlen);//メモリのコピー
-
 		}
 
 	}while((int)bp2-(int)msg<=len);
@@ -237,19 +205,15 @@ int create_msglist(struct msglist *head,void *msg,size_t len){
 	if(!head->next->data)
 		printf("NULL\n");
 
-
 	//printf("hdr->data = %d\n",(int)sizeof(head->next->data));
 	//printf("hdr->data = %s\n",head->next->data);
 	//printf("head = %d\n",(int)head);
-
-	//memset(b, '*', MSGSIZE+1);
-	//printf("%s\n",b);
 
 	return err;
 }
 
 
-
+// msglistからパケットの生成
 void create_packet(char *buf,struct msglist *ml){
 	char *bp = buf;
 
@@ -264,31 +228,19 @@ void create_packet(char *buf,struct msglist *ml){
 	return;
 }
 
+// コネクション
 int connect_sendst(struct socklist *sl,struct msglist *ml){
-	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;// header size
-//	int chsize = sizeof(uint16_t);// connection header size
+	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;// ヘッダーサイズ
 	int err = 0;
-//	char buf[hsize + chsize + 1];
-	char buf[hsize + 1];
-//	char *cp = buf;
+	char buf[hsize + 1];// ヘッダサイズ + 総id数
 
 	if(!ml){
 		printf("connection err 1\n");
 		return 0;
 	}
 
-
-
 	memset(buf,'\0',sizeof(buf));
 	create_packet(buf,ml);
-
-	/*
-	memcpy(cp,&ml->id,sizeof(uint16_t));
-	cp = cp + sizeof(uint16_t);
-	memcpy(cp,&ml->length,sizeof(uint16_t));
-	cp = cp + sizeof(uint16_t);
-	memcpy(cp,ml->data,connection_hdr_size);
-	*/
 
 	err = sendto(sl[0].sock, buf, sizeof(buf), 0, sl[0].addr, sl[0].addr_len);
 
@@ -301,6 +253,7 @@ int connect_sendst(struct socklist *sl,struct msglist *ml){
 
 }
 
+// メインのパケットの送信
 int do_sendst(struct socklist *sl,struct msglist *ml){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
@@ -309,9 +262,6 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 	char buf[hsize+MSGSIZE+1];
 	int if_num = 0;
 
-//	printf("aaa\n");
-
-
 	if(!p){
 		printf("do_send err 1\n");
 		return 0;
@@ -319,32 +269,14 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 
 	while(1){
 
-		/*
-		printf("buf %d\n",buf);
-		printf("cp %d\n",cp);
-		printf("size %d\n",sizeof(uint16_t) );
-		*/
-
-		// create packet
+		// 流すメッセージの長さを計算
 		mlen = hsize + p->length;
 
+		// パケット生成
 		memset(buf,'\0',sizeof(buf));
 		create_packet(buf,p);
-		/*
-		memset(buf,'\0',sizeof(buf));
-		memcpy(cp,&p->id,sizeof(uint16_t));
-		cp = cp + sizeof(uint16_t);
-		memcpy(cp,&p->length,sizeof(uint16_t));
-		cp = cp + sizeof(uint16_t);
-		memcpy(cp,p->data,p->length);
-		*/
 
-		/*
-		printf("buf:%s\n",buf);
-		printf("mlen:%d\n",mlen);
-		*/
-
-		// id = 3のパケットをドロップ
+		// id = 3と8のパケットをドロップ
 		if(p->id!=3&&p->id!=8)
 		err = sendto(sl[if_num].sock, buf, mlen, 0, sl[if_num].addr, sl[if_num].addr_len);
 
@@ -354,7 +286,7 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 		}
 
 		if(p->next==NULL){
-			printf("do_send break\n");
+			printf("do_send end\n");
 			break;
 		}
 
@@ -375,6 +307,7 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 }
 
 // サーバープログラムと同じ
+// 受信パケットからmsglist化する関数
 struct msglist *rebuild_msglist(char *buf){
 	struct msglist *ml;
 	char *p = buf;
@@ -395,64 +328,87 @@ struct msglist *rebuild_msglist(char *buf){
 	p = p + sizeof(uint16_t);
 	memcpy(ml->data,p,ml->length);
 
-	printf("id = %u\n",ml->id);
-	printf("key = %u\n",ml->key);
-	printf("length = %u\n",ml->length);
-	printf("data = %s\n",ml->data);
+//	printf("[rebuild]:id = %u\n",ml->id);
+//	printf("[rebuild]:key = %u\n",ml->key);
+//	printf("[rebuild]:length = %u\n",ml->length);
+//	printf("[rebuild]:data = %s\n",ml->data);
 
 	return ml;
 }
 
+// 再送
 int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
 	struct timespec ts;
 	struct msglist *mlp;
 	struct msglist *p;
-	char recvbuf[MSGSIZE+1];
+	char recvbuf[hsize+MSGSIZE+1];
 	char sendbuf[hsize+MSGSIZE+1];
 
-	ts.tv_sec = TIMER;
+	double timeout = TIMEOUT;
+	ts.tv_sec = SECTIMER;
 	ts.tv_nsec = NANOTIMER;
 
 	while(1){
 		p = ml;
 		memset(recvbuf,'\0',sizeof(recvbuf));
-		memset(sendbuf,'*',sizeof(sendbuf));
+		memset(sendbuf,'\0',sizeof(sendbuf));
 
+		// 再送パケットの受信
 		err = recvfrom (recvsl->sock, recvbuf, sizeof(recvbuf), 
 					MSG_DONTWAIT,recvsl->addr, &recvsl->addr_len);
 
-		if(err>0){
+		// 何か受信したら実行
+		if(err > 0){
+
 			mlp = rebuild_msglist(recvbuf);
 
+			// 終了idを手に入れたら終了
 			if(mlp->id==~0){
 				free(mlp);
+				break;
+
+			// 再送id以外を受信した場合の終了
+			}else if(mlp->id!=~0-1){
+				free(mlp);
+				printf("resend: no resend id\n");
+				break;
+
+			// 再送タイムアウト処
+			}else if(timeout==0){
+				printf("resend: timeout\n");
 				break;
 			}
 
 			while(1){
+				// msglistの先頭から該当するパケットに至るまで検索
 				if((uint32_t)*mlp->data==p->id){
 					create_packet(sendbuf,p);
 					err = sendto(sendsl[0].sock, sendbuf, sizeof(sendbuf), 0,
 											 sendsl[0].addr, sendsl[0].addr_len);
-					printf("Re:sendto = %d\n",err);
-					printf("re:id = %u\n",p->id);
-					printf("re:key = %u\n",p->key);
-					printf("re:length = %u\n",p->length);
-					printf("re:data = %s\n",p->data);
+					//printf("resend:err = %d\n",err);
+					printf("resend:id = %u\n",p->id);
+					//printf("resend:key = %u\n",p->key);
+					//printf("resend:length = %u\n",p->length);
+					//printf("resend:data = %s\n",p->data);
+
+					// タイマーリセット
+					timeout = TIMEOUT;
 
 					break;
 				}else if(p->next==NULL){
+					printf("resend: no much id\n");
 					break;
 				}
-				printf("Re::id=%d\n",p->id);
+
 				p = p->next;
 			}
 
 			free(mlp);
 		}
 		nanosleep(&ts, NULL);
+		timeout --;
 
 	}
 
@@ -462,6 +418,7 @@ int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml
 
 }
 
+// コネクション終了(なくてもいい？？)
 int close_sendst(struct socklist *sl){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
@@ -476,13 +433,6 @@ int close_sendst(struct socklist *sl){
 	memset(buf,'\0',sizeof(buf));
 	create_packet(buf,&ml);
 
-/*
-	memcpy(cp,&ml.id,sizeof(uint16_t));
-	cp = cp + sizeof(uint16_t);
-	memcpy(cp,&ml->length,sizeof(uint16_t));
-	cp = cp + sizeof(uint16_t);
-	memcpy(cp,ml->data,connection_hdr_size);
-*/
 	err = sendto(sl[0].sock, buf, sizeof(buf), 0, sl[0].addr, sl[0].addr_len);
 
 	if(!err){
@@ -493,6 +443,7 @@ int close_sendst(struct socklist *sl){
 	return 1;
 }
 
+// msglistの開放
 void free_msglist(struct msglist *ml){
 	struct msglist *p = NULL;
 	struct msglist *np = ml;
@@ -510,6 +461,7 @@ void free_msglist(struct msglist *ml){
 	return;
 }
 
+// 本体
 int sendst(int fd, void *msg, size_t len, unsigned int flags,
 							 struct sockaddr *addr, int addr_len){
 	int err = 0;
@@ -519,15 +471,14 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 	struct socklist sl[MAXIF];
 
 
-	/* リスト先頭の記憶領域の確保 */
+	// リスト先頭の記憶領域の確保
 	if ((ml = (struct msglist *) malloc(sizeof(struct msglist))) == NULL) {
 		printf("malloc error 1\n");
 		return 0;
 	}
 
+	// 先頭のmsglistの初期化
 	init_list_head(ml,len);
-
-	printf("key = %u\n",ml->key);
 
 	err = create_msglist(ml,msg,len);
 	if(!err){
@@ -561,7 +512,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 
 			// MacOSだと使えないのでコメントアウト
-			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
+//			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
 
 			printf("dev:%s size:%u\n",dev[i],wcount[i]);
 

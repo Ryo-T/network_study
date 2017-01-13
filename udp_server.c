@@ -7,10 +7,10 @@
 
 #define PORT 8000
 #define CPORT 8100
-#define CADDRESS "192.168.10.129"
+#define CADDRESS "127.0.0.1"
 
 #define BUFFERSIZE 1024*1024
-#define MSGSIZE 110
+#define MSGSIZE 11
 #define KYE 200
 
 #define TIMER 0//1秒
