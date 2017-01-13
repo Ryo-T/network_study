@@ -3,15 +3,14 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/time.h>
-#include "mpudp.h"
 
 
-//#define PORT 8000
+#define PORT 8000
 #define CPORT 8100
-#define CADDRESS "127.0.0.1"
+#define CADDRESS "192.168.10.129"
 
 #define BUFFERSIZE 1024*1024
-//#define MSGSIZE 11
+#define MSGSIZE 110
 #define KYE 200
 
 #define TIMER 0//1秒
@@ -21,7 +20,6 @@
 void *memset(void *buf, int ch, size_t n);
 int close(int fd);
 
-/*
 struct msglist{
 	struct msglist *next;
 	struct msglist *back;
@@ -36,7 +34,6 @@ struct socklist{
 	struct sockaddr *addr;
 	int addr_len;
 };
-*/
 
 /*
 struct connection_hdr{
@@ -62,7 +59,7 @@ struct socklist set_caddr(void){
 
  	return sl;
 }
-/*
+
 void free_msglist(struct msglist *ml){
 	struct msglist *p = NULL;
 	struct msglist *np = ml;
@@ -79,7 +76,7 @@ void free_msglist(struct msglist *ml){
 
 	return;
 }
-*/
+
 struct msglist *rebuild_msglist(char *buf){
 	struct msglist *ml;
 	char *p = buf;
@@ -499,7 +496,7 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 	return msgsize; 
 }
 
-/*
+
 int main(){
 	int sock;
 	struct sockaddr_in addr;
@@ -548,5 +545,3 @@ int main(){
 
 	return 0;
 }
-
-*/

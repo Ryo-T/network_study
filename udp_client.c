@@ -6,13 +6,12 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <string.h>
-#include "mpudp.h"
 
 #define SENDTOADDR "127.0.0.1"
 #define PORT 8000
 #define CPORT 8100
 
-//#define MSGSIZE 11
+#define MSGSIZE 110
 #define KYE 100
 
 #define MAXIF 10 // default 10
@@ -28,7 +27,7 @@
 in_addr_t inet_addr(const char *cp);
 int close(int fd);
 
-/*
+
 struct msglist{
 	struct msglist *next;
 	struct msglist *back;
@@ -43,8 +42,6 @@ struct socklist{
 	struct sockaddr *addr;
 	int addr_len;
 };
-*/
-
 
 /*
 struct connection_hdr{
@@ -564,7 +561,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 
 			// MacOSだと使えないのでコメントアウト
-//			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
+			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
 
 			printf("dev:%s size:%u\n",dev[i],wcount[i]);
 
@@ -621,8 +618,6 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 	return err;
 }
-
-/*
 
 // get file data size
 long get_file_size(const char *file[]){
@@ -704,4 +699,3 @@ int main(){
 
 	return 0;
 }
-*/
