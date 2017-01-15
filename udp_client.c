@@ -7,9 +7,13 @@
 #include <sys/time.h>
 #include <string.h>
 
-// 送信先アドレスとポート
+// 送信先アドレス
 #define SENDTOADDR "127.0.0.1"
+#define SENDTOADDR2 "127.0.0.1"
+// 送信先ポート
 #define PORT 8000
+#define PORT2 8001
+// 再送パケット受信ポート
 #define CPORT 8100
 
 #define MSGSIZE 11
@@ -23,10 +27,13 @@
 //#define WORDCOUNT 3
 #define WORDCOUNT 5,5
 
-// TIMEOUT関連
-#define TIMEOUT 500000000
 #define SECTIMER 0//1秒
-#define NANOTIMER 10//ナノ秒
+#define NANOTIMER 10000//ナノ秒
+
+// TIMEOUT関連
+#define __RE__TIMEOUT 400000
+#define __RE__SECTIMER 0//1秒
+#define __RE__NANOTIMER 10//ナノ秒
 
 in_addr_t inet_addr(const char *cp);
 int close(int fd);
@@ -232,7 +239,7 @@ void create_packet(char *buf,struct msglist *ml){
 int connect_sendst(struct socklist *sl,struct msglist *ml){
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;// ヘッダーサイズ
 	int err = 0;
-	char buf[hsize + 1];// ヘッダサイズ + 総id数
+	char buf[hsize + 4 + 1];// ヘッダサイズ + 総id数(4バイト)
 
 	if(!ml){
 		printf("connection err 1\n");
@@ -261,6 +268,10 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 	struct msglist *p = ml;
 	char buf[hsize+MSGSIZE+1];
 	int if_num = 0;
+
+	struct timespec ts;
+	ts.tv_sec = SECTIMER;
+	ts.tv_nsec = NANOTIMER;
 
 	if(!p){
 		printf("do_send err 1\n");
@@ -291,6 +302,8 @@ int do_sendst(struct socklist *sl,struct msglist *ml){
 		}
 
 		p = p->next;
+
+		nanosleep(&ts, NULL);
 
 //if関連
 //---------------------------------------
@@ -340,15 +353,17 @@ struct msglist *rebuild_msglist(char *buf){
 int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
+	uint32_t rid;
 	struct timespec ts;
 	struct msglist *mlp;
 	struct msglist *p;
 	char recvbuf[hsize+MSGSIZE+1];
 	char sendbuf[hsize+MSGSIZE+1];
 
-	double timeout = TIMEOUT;
-	ts.tv_sec = SECTIMER;
-	ts.tv_nsec = NANOTIMER;
+	int timeout = __RE__TIMEOUT;
+	ts.tv_sec = __RE__SECTIMER;
+	ts.tv_nsec = __RE__NANOTIMER;
+
 
 	while(1){
 		p = ml;
@@ -375,15 +390,15 @@ int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml
 				printf("resend: no resend id\n");
 				break;
 
-			// 再送タイムアウト処
-			}else if(timeout==0){
-				printf("resend: timeout\n");
-				break;
 			}
+
+			memcpy(&rid,mlp->data,sizeof(uint32_t));
+			printf("request id:%u\n",(uint32_t)rid);
 
 			while(1){
 				// msglistの先頭から該当するパケットに至るまで検索
-				if((uint32_t)*mlp->data==p->id){
+				//if((uint32_t)*mlp->data==p->id){
+				if(rid==p->id){
 					create_packet(sendbuf,p);
 					err = sendto(sendsl[0].sock, sendbuf, sizeof(sendbuf), 0,
 											 sendsl[0].addr, sendsl[0].addr_len);
@@ -394,7 +409,7 @@ int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml
 					//printf("resend:data = %s\n",p->data);
 
 					// タイマーリセット
-					timeout = TIMEOUT;
+					timeout = __RE__TIMEOUT;
 
 					break;
 				}else if(p->next==NULL){
@@ -408,7 +423,15 @@ int re_sendst(struct socklist *recvsl,struct socklist *sendsl,struct msglist *ml
 			free(mlp);
 		}
 		nanosleep(&ts, NULL);
-		timeout --;
+		timeout--;
+
+		//printf("timeout = %d\n", timeout);
+
+		// 再送タイムアウト処理
+		if(timeout==0){
+				printf("resend: timeout\n");
+				break;
+		}
 
 	}
 
@@ -486,7 +509,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 		return 0;
 	}
 
-
+	// IF数を0に指定した場合はデフォルトの動作
 	if(HOW_MANY_IF==0){
 
 		sl[0].sock = fd;
@@ -495,10 +518,9 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 	}else{
 
-//		add_socklist(sl);
-
 		int i;
 
+		// IFの数だけソケット生成
 		for(i = 0; i < HOW_MANY_IF; i++){
 
 			sl[i].sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -510,7 +532,6 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 			sl[i].addr = addr;
 			sl[i].addr_len = addr_len;
 
-
 			// MacOSだと使えないのでコメントアウト
 //			setsockopt(sl[i].sock, SOL_SOCKET, SO_BINDTODEVICE, dev[i], wcount[i]);
 
@@ -518,13 +539,23 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 
 		}
 
+		// ちょっとずるいけど複数送信先の指定
+		//----------------------------------------------
+		if(HOW_MANY_IF==2){
+		struct sockaddr_in addr2;
+		addr2.sin_family = AF_INET;
+		addr2.sin_port = htons(PORT2);
+		addr2.sin_addr.s_addr = inet_addr(SENDTOADDR2);
+		sl[1].addr = (struct sockaddr *)&addr2;
+		sl[1].addr_len = sizeof(addr2);
+		}
+		//----------------------------------------------
 	}
 
 
 	struct socklist rsl;// 受信用ソケットリスト
 
 	// コネクション開始
-//	err = connect_sendst(sl[0].sock, ml, sl[0].addr, sl[0].addr_len);
 	err = connect_sendst(sl, ml);
 	if(!err)return err;
 
@@ -541,26 +572,6 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 	err = re_sendst(&rsl,sl,ml->next);
 	if(!err)return err;
 
-	// 最後closeパケット送らなくても大丈夫そう(?)
-//	err = close_sendst(sl);
-//	if(!err)return err;
-
-/*
-	err = connect_sendst(fd, ml, addr, addr_len);
-	if(!err)return err;
-
-	err = do_sendst(fd, ml->next, addr, addr_len);
-	if(!err)return err;
-
-	err = close_sendst(fd, addr, addr_len);
-	if(!err)return err;
-*/
-
-//	err = sendto(fd, msg, len, 0, addr, addr_len);
-
-
-//	printf("sizeof(buf)=%d,\n%s\n",(int)sizeof(msg),(char *)msg);
-//	printf("len=%d,\n%s\n",len,(char *)msg);
 
 	close(sl[0].sock);
 	close(sl);
@@ -570,7 +581,7 @@ int sendst(int fd, void *msg, size_t len, unsigned int flags,
 	return err;
 }
 
-// get file data size
+// ファイルのデータサイズを取得
 long get_file_size(const char *file[]){
 	fpos_t fsize;
 	long sz = 0;
@@ -578,7 +589,6 @@ long get_file_size(const char *file[]){
 	FILE *fp = fopen(file,"rb");
 
 	fseek(fp,0,SEEK_END);
-//	fgetpos(fp,&fsize); 
 	sz = ftell(fp);
 
 	printf("FILESIZE = %lo\n",sz);
@@ -587,12 +597,6 @@ long get_file_size(const char *file[]){
 
 	return sz;
 }
-
-
-
-
-
-
 
 int main(){
 	int sock;
@@ -635,8 +639,6 @@ int main(){
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(PORT);
 	addr.sin_addr.s_addr = inet_addr(SENDTOADDR);
-
-       printf("debug\n");
 
 	err = sendst(sock,buf,sizeof(buf),0,(struct sockaddr *)&addr, sizeof(addr));
 

@@ -69,6 +69,8 @@ int main(){
 	server.sin_port = htons(PORT);
 	server.sin_addr.s_addr = inet_addr(ADDRESS);
 
+//	setsockopt(sock, SOL_SOCKET,SO_MAX_MSG_SIZE, "11", 2);
+
 	/* サーバに接続 */
 	err = connect(sock, (struct sockaddr *)&server, sizeof(server));
 	if(err < 0){

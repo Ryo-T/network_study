@@ -4,18 +4,25 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 
-
+// 受信ポート
 #define PORT 8000
+// 再送パケット送信ポート
 #define CPORT 8100
+// 再送パケット送信アドレス
 #define CADDRESS "127.0.0.1"
 
-#define BUFFERSIZE 1024*1024
+#define BUFFERSIZE 1024*1024*2
 #define MSGSIZE 11
 #define KYE 200
 
-#define TIMER 0//1秒
+// TIMEOUT関連
+#define TIMEOUT 1000
+#define STIMER 0//1秒
 #define NANOTIMER 10//ナノ秒
 
+#define __RE__TIMEOUT 1000
+#define __RE__STIMER 0//1秒
+#define __RE__NANOTIMER 10//ナノ秒
 
 void *memset(void *buf, int ch, size_t n);
 int close(int fd);
@@ -35,11 +42,7 @@ struct socklist{
 	int addr_len;
 };
 
-/*
-struct connection_hdr{
-	uint16_t key;
-};
-*/
+// 再送先のアドレス設定
 struct socklist set_caddr(void){
 	struct socklist sl;
 	static struct sockaddr_in addr2;
@@ -60,6 +63,7 @@ struct socklist set_caddr(void){
  	return sl;
 }
 
+// msglistの開放
 void free_msglist(struct msglist *ml){
 	struct msglist *p = NULL;
 	struct msglist *np = ml;
@@ -77,6 +81,7 @@ void free_msglist(struct msglist *ml){
 	return;
 }
 
+// 受信パケットからmsglistを再構成
 struct msglist *rebuild_msglist(char *buf){
 	struct msglist *ml;
 	char *p = buf;
@@ -97,14 +102,15 @@ struct msglist *rebuild_msglist(char *buf){
 	p = p + sizeof(uint16_t);
 	memcpy(ml->data,p,ml->length);
 
-	printf("id = %u\n",ml->id);
-	printf("key = %u\n",ml->key);
-	printf("length = %u\n",ml->length);
-	printf("data = %s\n",ml->data);
+	//printf("rebuild:id = %u\n",ml->id);
+	//printf("rebuild:key = %u\n",ml->key);
+	//printf("rebuild:length = %u\n",ml->length);
+	//printf("rebuild:data = %s\n",ml->data);
 
 	return ml;
 }
 
+// コネクションパケットの受信
 struct msglist *accept_recvst(int fd,unsigned int flag){
 	struct msglist *ml;
 	int err = 0;
@@ -116,12 +122,14 @@ struct msglist *accept_recvst(int fd,unsigned int flag){
 		return NULL;
 	}
 
+	// msglist再構成
 	ml = rebuild_msglist(buf);
 	if(!ml){
 		printf("rebuild_msglist err\n");
 		return NULL;
 	}
 
+	// idが0でなければ終了
 	if(ml->id!=0){
 		printf("id err\n");
 		free_msglist(ml);
@@ -133,6 +141,7 @@ struct msglist *accept_recvst(int fd,unsigned int flag){
 	return ml;
 }
 
+// データ受信
 int do_recvst(int fd,struct msglist *front,unsigned int flag,uint8_t *ack_arr){
 	struct msglist *ml;
 	int err = 0;
@@ -140,18 +149,22 @@ int do_recvst(int fd,struct msglist *front,unsigned int flag,uint8_t *ack_arr){
 
 	memset(buf,'\0',sizeof(buf));
 
-	err = recv(fd, buf, sizeof(buf), flag);
+//	err = recv(fd, buf, sizeof(buf), flag);
+	err = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+	//err = recvfrom(recvsl->sock, recvbuf, sizeof(recvbuf), MSG_DONTWAIT,recvsl->addr, &recvsl->addr_len);
 	if(err<0){
-		printf("accept_recvst err\n");
-		return 0;
+		printf("recvst err\n");
+		return 2;
 	}
 
+	// msglist再構成
 	ml = rebuild_msglist(buf);
 	if(!ml){
 		printf("rebuild_msglist err\n");
 		return 0;
 	}
 
+	// idが0の反転ビットならば終了
 	if(ml->id==(uint32_t)~0){
 		printf("close\n");
 		return 0;
@@ -171,6 +184,7 @@ int do_recvst(int fd,struct msglist *front,unsigned int flag,uint8_t *ack_arr){
 
 }
 
+// 受信パケットリストの初期化
 void init_ack_arr(uint8_t *ack_arr,uint32_t ids){
 	int i;
 	uint8_t *p = ack_arr;
@@ -186,7 +200,7 @@ void init_ack_arr(uint8_t *ack_arr,uint32_t ids){
 	return;
 }
 
-// clientとかぶってる
+// msglistからパケットの生成(clientとかぶってる)
 void create_packet(char *buf,struct msglist *ml){
 	char *bp = buf;
 
@@ -201,36 +215,42 @@ void create_packet(char *buf,struct msglist *ml){
 	return;
 }
 
+// 再送要求
 int rq_resendst(struct socklist *sl,uint8_t *ack_arr,uint32_t ids){
 	int err = 0;
 	uint8_t *p = ack_arr+sizeof(uint8_t);
 	static struct msglist ml;
 	char buf[13];// 32b + 16b + 16b + 32b
-	int i;
+	uint32_t i;
+	void *ip;
 
+	// 0はコネクションパケットidなので飛ばす
 	for(i=1;i<=ids;i++){
-		printf("p = %u at %u\n",*p,p);
+		//printf("p = %u at %u\n",*p,p);
 		if(*p == 1) {
 			p = p + sizeof(uint8_t);
 			continue;
 		}
 
 		memset(buf,'\0',sizeof(buf));
+		memset(ml.data,'\0',sizeof(ml.data));
 
+		// 再装用idを指定
 		ml.id = ~0-1;
 		ml.length = sizeof(uint32_t);	
 		ml.key = KYE;
 
-		memcpy(ml.data,(char *)&i,sizeof(uint32_t));
+		memcpy(ml.data,&i,sizeof(uint32_t));
 
 		create_packet(buf,&ml);
-		printf("id:%u,data:%s\n",i,ml.data);
+//		printf("[request]id:%u,data:%u\n",i,(uint32_t)ml.data);
 
+		// 再送要求
 		err = sendto(sl->sock,buf,sizeof(buf)-1,0,sl->addr,sl->addr_len);
 
 		if(err<0){
 			printf("Re sendto err\n");
-//			return err;
+			//return err;
 		}
 
 		p = p + sizeof(uint8_t);
@@ -241,6 +261,7 @@ int rq_resendst(struct socklist *sl,uint8_t *ack_arr,uint32_t ids){
 	return 1;
 }
 
+// 再送パケットの取得
 struct msghdr *get_resendst(int　fd,struct msglist *tail,uint8_t *ack_arr){
 	struct msglist *mlp = tail;
 	struct msglist *mlp_next;
@@ -249,18 +270,27 @@ struct msghdr *get_resendst(int　fd,struct msglist *tail,uint8_t *ack_arr){
 
 // タイマーでちょっと待ち
 //---------------------------------	
+//	int timeout = __RE__TIMEOUT;
 	struct timespec ts;		
-	ts.tv_sec = TIMER;
-	ts.tv_nsec = NANOTIMER;
+	ts.tv_sec = __RE__STIMER;
+	ts.tv_nsec = __RE__NANOTIMER;
 	nanosleep(&ts, NULL);
 //---------------------------------
 
 	while(1){
+
+//		timeout--;
 		memset(buf,'\0',sizeof(buf));
 
 		err = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
-		if(err<0){
+/*
+		if(timeout<0){
 			printf("time out\n");
+			break;
+		}
+*/
+		if(err<0){
+			//printf("packet wait\n");
 			break;
 		}
 
@@ -281,12 +311,12 @@ struct msghdr *get_resendst(int　fd,struct msglist *tail,uint8_t *ack_arr){
 		uint8_t *p = ack_arr;
 		p = p + mlp_next->id;
 
-		printf("get packet id is [%u]\n", mlp_next->id);
-		printf("get packet len is [%u]\n", mlp_next->length);
-		printf("get packet key is [%u]\n", mlp_next->key);
-		printf("get packet len is [%s]\n", mlp_next->data);
+//		printf("get packet id is [%u]\n", mlp_next->id);
+//		printf("get packet len is [%u]\n", mlp_next->length);
+//		printf("get packet key is [%u]\n", mlp_next->key);
+//		printf("get packet len is [%s]\n", mlp_next->data);
 
-		// 既に取得しているパケットかどうかの確認
+		// 既に取得しているパケット
 		if(*p==1){
 			printf("alredy get [%u] packet\n",mlp_next->id);
 			continue;
@@ -306,6 +336,7 @@ struct msghdr *get_resendst(int　fd,struct msglist *tail,uint8_t *ack_arr){
 
 }
 
+// チェックリストの初期化
 int check_ackarr(uint8_t *ack_arr,uint32_t ids){
 	uint8_t *p = ack_arr;
 	int counter = 0;
@@ -320,7 +351,7 @@ int check_ackarr(uint8_t *ack_arr,uint32_t ids){
 	return counter;
 }
 
-// クライアント側と同じ
+// 終了パケットの生成(クライアント側と同じ)
 int close_sendst(struct socklist *sl){
 	int err = 0;
 	int hsize = sizeof(uint32_t)+sizeof(uint16_t)*2;
@@ -335,13 +366,6 @@ int close_sendst(struct socklist *sl){
 	memset(buf,'\0',sizeof(buf));
 	create_packet(buf,&ml);
 
-/*
-	memcpy(cp,&ml.id,sizeof(uint16_t));
-	cp = cp + sizeof(uint16_t);
-	memcpy(cp,&ml->length,sizeof(uint16_t));
-	cp = cp + sizeof(uint16_t);
-	memcpy(cp,ml->data,connection_hdr_size);
-*/
 	err = sendto(sl[0].sock, buf, sizeof(buf), 0, sl[0].addr, sl[0].addr_len);
 
 	if(!err){
@@ -352,19 +376,18 @@ int close_sendst(struct socklist *sl){
 	return 1;
 }
 
+// データストリームの再構築
 int collect_datas(void *ubuf,struct msglist *head,size_t bufsize){
 	struct msglist *p = head;
 	struct msglist *np = head->next;
-//	char *b = ubuf;
 	char *b;
 	int size = 0;
 
-	//memset(ubuf,'\0',sizeof(ubuf));
 	memset(ubuf,'\0',bufsize);
 
 	printf("buf size = %d\n",bufsize);
 
-	do{
+	while(np!=NULL){
 		p = np;
 		np = np->next;
 
@@ -376,23 +399,33 @@ int collect_datas(void *ubuf,struct msglist *head,size_t bufsize){
 
 		b = ubuf + MSGSIZE*(p->id-1);
 
+		//printf("write id:%u\n",p->id);
+		//printf("write ln:%u\n",p->length);
+		//printf("write da:%s\n",p->data);
 		memcpy(b,p->data,p->length);
-//		b = b + p->length;
 
-		printf("[id=%u] [length=%u] data:%s\n",p->id,p->length,p->data);
+		//printf("[id=%u] [length=%u]\n",p->id,p->length);
 
-	}while(np!=NULL);
+	}
 
 	return size;
 
 }
 
-int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
+//　受信
+int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 	int err = 0;
 	int msgsize = 0;// all stream data size
 	struct msglist *head;// first packet
 	struct msglist *last;// first packet
 	struct msglist *ml;
+// タイマー
+//-----------------------------
+	int timeout = TIMEOUT;
+	struct timespec ts;		
+	ts.tv_sec = STIMER;
+	ts.tv_nsec = NANOTIMER;
+//-----------------------------
 
 	// コネクション関数
 	head = accept_recvst(fd,flag);// get connection packet
@@ -414,7 +447,7 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 	uint32_t ids = 0;// how many packets will be come
 	memcpy(&ids,head->data,sizeof(uint32_t));
 	if(ids<1) return -1;
-	printf("ids = %d\n",ids);
+	printf("max id = %d\n",ids);
 
 	uint8_t *ack_arr;
 	// uint32サイズの配列無いからメモリで配列っぽいものを作成
@@ -424,9 +457,6 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 	}
 
 	init_ack_arr(ack_arr,ids);
-//	printf("*ack_arr = %u\n\n",ack_arr );
-
-//	printf("plist = %u\n",(uint8_t)*(ack_arr));
 
 //---------------------
 
@@ -435,11 +465,26 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 	while(1){
 
 		err = do_recvst(fd,ml,flag,ack_arr);
-		if(!err) break;
+		// 終了
+		if(err == 0){
+			printf("get close packet\n");
+			break;
+		// パケット到達なし
+		}else if(err == 2){
+			nanosleep(&ts, NULL);
+			timeout--;
+			if (timeout==0){
+				break;
+			}
+			continue;
+		// パケット到達
+		}else{
+			timeout = TIMEOUT;
+			ml = ml->next;
 
-		ml = ml->next;
+			printf("[recv]:id = %u\n",ml->id);
 
-		printf("id=======%u\n",ml->id);
+		}
 
 	}
 
@@ -448,24 +493,28 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 
 //再送処理
 //----------------------------------------------------
+	long counter;
 
 	while(1){
 
+		// 再送要求
 		err = rq_resendst(&sl,ack_arr,ids);
 
 		if(err<0){
-			printf("rq_resendst = err\n");
+			printf("rq_resendst err\n");
 			break;
 		}
 
-//		ml = get_resendst(fd,ml,ack_arr);
+		// 再送パケット受信
 		ml = get_resendst(fd,ml,ack_arr);
+		// チェックリストの確認
 		err = check_ackarr(ack_arr,ids);
 
-		printf("check counter = %d\n", err);
+//		printf("check counter = %d\n", err);
+		counter = counter + err;
 
 		if(err==0){
-			printf("get all packet = %d\n",err);
+			printf("get all packet:%d\n",err);
 			break;
 		}
 		
@@ -473,13 +522,12 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 
 	// 終了
 	err = close_sendst(&sl);
-	printf("close_sendst = %d\n",err );
+	//printf("close_sendst = %d\n",err );
 
 
 //----------------------------------------------------
 
-
-	printf("head->id:%u\n",head->next->id);
+	//printf("head->id:%u\n",head->next->id);
 
 	//再送用ソケットの開放
 	close(sl.sock);
@@ -493,14 +541,16 @@ int recvst(int fd, void *ubuf, size_t size, unsigned int flag){
 	// チェック配列のメモリの開放
 	free(ack_arr);
 
-	return msgsize; 
+//	return msgsize; 
+	return counter;
 }
 
 
 int main(){
 	int sock;
 	struct sockaddr_in addr;
-	char buf[BUFFERSIZE];
+	//char buf[BUFFERSIZE];
+	char *buf;
 	int err = 0;
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -521,13 +571,16 @@ int main(){
 		return 0;
 	}
 
-
+	if ((buf = (char *) malloc(sizeof(char)*BUFFERSIZE)) == NULL) {
+		printf("malloc error \n");
+		return 0;
+	}
 
 	//while(1){
 
 		memset(buf, '\0', sizeof(buf));
 
-		err = recvst(sock,buf,sizeof(buf),0);
+		err = recvst(sock,buf,BUFFERSIZE,0);
 
 //		err = recv(sock, buf, sizeof(buf), 0);
 
@@ -540,7 +593,7 @@ int main(){
 
 	//}
 
-
+	free(buf);
 	close(sock);
 
 	return 0;

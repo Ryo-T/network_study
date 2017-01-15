@@ -1,31 +1,35 @@
 #include <stdio.h>
+#include <netinet/in.h>
 //#include <time.h>
-#include <sys/time.h>
 
-#define MAX 5
-#define LIST "aaa","bbb","ccc","ddd","eee"
-
-void f(int *k){
-	k[0] = 100;
-	k[1] = 200;
-	k[2] = 300;
-
-	return;
-}
+struct msglist{
+	struct msglist *next;
+	struct msglist *back;
+	uint32_t id;
+	uint16_t key;
+	uint16_t length;
+	char data[10];
+};
 
 int main(){
-	struct timespec ts;
-	ts.tv_sec = 1;// 秒
-	ts.tv_nsec = 0;// nano秒
+	struct msglist ml;
+	char buf[1024];
+	uint32_t p,q;
+	memset(buf,'\0',sizeof(buf));
 
-	char *n[MAX] = {LIST};
+	ml.id = 100000;
 
-	int i;
-	for(i = 0;i<MAX;i++){
-		printf("n = %s\n",n[i]);
-		nanosleep(&ts, NULL);
-	}
+	memcpy(buf,&ml.id,sizeof(uint32_t));
 
+	printf("%s\n",buf);
+	printf("%u\n",(uint32_t)buf);
+	//printf("%u\n",*buf);
+	//printf("%u\n",(uint32_t)*buf);
+	memcpy(&q,buf,sizeof(uint32_t));
+	printf("%u\n",q);
+
+	memcpy(&p,&ml.id,sizeof(uint32_t));
+	printf("%u\n",p);
 
 	return 0;
 }
