@@ -22,10 +22,10 @@
 // インターフェース関連
 #define MAXIF 10 // default 10
 #define HOW_MANY_IF 0
-//#define IF_LIST "lo0"
-#define IF_LIST "ens38","ens33"
-//#define WORDCOUNT 3
-#define WORDCOUNT 5,5
+#define IF_LIST "lo0","lo0"
+//#define IF_LIST "ens38","ens33"
+#define WORDCOUNT 3,3
+//#define WORDCOUNT 5,5
 
 #define SECTIMER 0//1秒
 #define NANOTIMER 10000//ナノ秒
