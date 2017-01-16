@@ -11,20 +11,20 @@
 #define CPORT 8100
 #define CPORT2 8101
 // 再送パケット送信アドレス
-#define CADDRESS "127.0.0.1"
-#define CADDRESS2 "127.0.0.1"
+#define CADDRESS "192.168.211.134"
+#define CADDRESS2 "192.168.211.135"
 
 #define BUFFERSIZE 1024*1024*2
-#define MSGSIZE 11
+#define MSGSIZE 9000
 #define KYE 200
 
 // インターフェース関連
 #define MAXIF 10 // default 10
 #define HOW_MANY_IF 2
-#define IF_LIST "lo0","lo0"
-//#define IF_LIST "ens38","ens33"
-#define WORDCOUNT 3,3
-//#define WORDCOUNT 5,5
+//#define IF_LIST "lo0","lo0"
+#define IF_LIST "ens38","ens33"
+//#define WORDCOUNT 3,3
+#define WORDCOUNT 5,5
 
 // TIMEOUT関連
 #define TIMEOUT 1000
@@ -100,7 +100,7 @@ struct socklist set_saddr(int port,char *dev,int wcount){
 		return sl;
 	}
 
-//	setsockopt(sl.sock, SOL_SOCKET, SO_BINDTODEVICE, dev, wcount);
+	setsockopt(sl.sock, SOL_SOCKET, SO_BINDTODEVICE, dev, wcount);
 
  	return sl;
 }
@@ -184,16 +184,15 @@ struct msglist *accept_recvst(int fd,unsigned int flag){
 }
 
 // データ受信
-int do_recvst(struct socklist *sl,struct msglist *front,unsigned int flag,uint8_t *ack_arr){
+int do_recvst(int sock,struct msglist *front,unsigned int flag,uint8_t *ack_arr){
 	struct msglist *ml;
 	int err = 0;
 	char buf[BUFFERSIZE];
-	int if_num = 0;
 
 	memset(buf,'\0',sizeof(buf));
 
 //	err = recv(fd, buf, sizeof(buf), flag);
-	err = recv(sl[if_num].sock, buf, sizeof(buf), MSG_DONTWAIT);
+	err = recv(sock, buf, sizeof(buf), MSG_DONTWAIT);
 	//err = recvfrom(recvsl->sock, recvbuf, sizeof(recvbuf), MSG_DONTWAIT,recvsl->addr, &recvsl->addr_len);
 	if(err<0){
 		printf("recvst err\n");
@@ -224,10 +223,10 @@ int do_recvst(struct socklist *sl,struct msglist *front,unsigned int flag,uint8_
 
 //if関連
 //---------------------------------------
-	if(HOW_MANY_IF!=0){
-		if_num = (if_num+1)%HOW_MANY_IF;
-	}
-	printf("IF = %d\n",if_num);
+//	if(HOW_MANY_IF!=0){
+//		if_num = (if_num+1)%HOW_MANY_IF;
+//	}
+//	printf("IF = %d\n",if_num);
 //---------------------------------------
 
 
@@ -315,7 +314,7 @@ int rq_resendst(struct socklist *sl,uint8_t *ack_arr,uint32_t ids){
 }
 
 // 再送パケットの取得
-struct msghdr *get_resendst(int　fd,struct msglist *tail,uint8_t *ack_arr){
+struct msghdr *get_resendst(int fd,struct msglist *tail,uint8_t *ack_arr){
 	struct msglist *mlp = tail;
 	struct msglist *mlp_next;
 	int err = 0;
@@ -488,15 +487,15 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 
 // 受信場所定義
 //--------------------------------------------
-	struct socklist rsl[MAXIF];
+	struct socklist recv_sl[MAXIF];
 	char *dev[HOW_MANY_IF] = {IF_LIST};
 	int wcount[HOW_MANY_IF] = {WORDCOUNT};
 
 	if(HOW_MANY_IF==0){
-		rsl[0].sock = fd;
+		recv_sl[0].sock = fd;
 	}else if(HOW_MANY_IF == 2){
-		rsl[0] = set_saddr(CPORT,dev[0],wcount[0]);
-		rsl[1] = set_saddr(CPORT,dev[1],wcount[1]);
+		recv_sl[0] = set_saddr(PORT,dev[0],wcount[0]);
+		recv_sl[1] = set_saddr(PORT2,dev[1],wcount[1]);
 	}
 //--------------------------------------------
 
@@ -526,13 +525,20 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 	init_ack_arr(ack_arr,ids);
 
 //---------------------
-
+	int if_num = 0;
 
 	// データ部受信
 	while(1){
 
 //		err = do_recvst(fd,ml,flag,ack_arr); //通常版
-		err = do_recvst(rsl,ml,flag,ack_arr); //複数ポート版
+		err = do_recvst(recv_sl[if_num].sock,ml,flag,ack_arr); //複数ポート版
+
+	        if(HOW_MANY_IF!=0){
+        	        if_num = (if_num+1)%HOW_MANY_IF;
+        	}
+
+     		printf("IF = %d\n",if_num);
+
 
 		// 終了
 		if(err == 0){
@@ -562,7 +568,7 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 
 //再送処理
 //----------------------------------------------------
-	long counter;
+	long counter = 0;
 
 	while(1){
 
@@ -586,7 +592,7 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 			printf("get all packet:%d\n",err);
 			break;
 		}
-		
+
 	}
 
 	// 終了
