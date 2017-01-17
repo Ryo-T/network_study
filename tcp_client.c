@@ -5,7 +5,7 @@
 
 //#define BUFFERSIZE 32
 #define PORT 8000
-#define ADDRESS "127.0.0.1"
+#define ADDRESS "192.168.211.135"
 
 
 // get file data size

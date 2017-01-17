@@ -2,6 +2,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/sctp.h>
+
 
 #define PORT 8000
 #define BUFFERSIZE 1024*1024
@@ -20,7 +22,7 @@ int main(){
 	int size = 0;
 
 	/* ソケットの作成 */
-	sock0 = socket(AF_INET, SOCK_STREAM, 0);
+	sock0 = socket(PF_INET, SOCK_SEQPACKET, IPPROTO_SCTP);
 	if(sock0 < 0){
 		printf("sock err\n");
 		return 0;
@@ -38,6 +40,16 @@ int main(){
 	}
 
 
+	struct sctp_initmsg sctp_init;
+	memset(&sctp_init,0,sizeof(sctp_init));
+	sctp_init.sinit_num_ostreams = 10;
+	sctp_init.sinit_max_instreams = 10;
+	sctp_init.sinit_max_attempts = 0;
+	sctp_init.sinit_max_init_timeo = 0;
+	setsockopt(sock0,IPPROTO_SCTP,SCTP_INITMSG,&sctp_init,sizeof(sctp_init));
+
+
+
 	/* TCPクライアントからの接続要求を待てる状態にする */
 	err = listen(sock0, 5);
 	if(err<0){
@@ -47,7 +59,7 @@ int main(){
 
 	/* TCPクライアントからの接続要求を受け付ける */
 	len = sizeof(client);
-	sock = accept(sock0, (struct sockaddr *)&client, &len);
+//	sock = accept(sock0, (struct sockaddr *)&client, &len);
 	if(sock < 0){
 		printf("accept err\n");
 		return 0;
@@ -65,11 +77,17 @@ int main(){
 	// サーバからデータを受信 
 	memset(buf, 0, sizeof(buf));
 
+
+	int flags;
+	struct sctp_sndrcvinfo sndrcvinfo;
+
 	while(1){
 
 		memset(data,'\0',sizeof(buf));
 
-		err = read(sock, data, sizeof(buf));
+//		err = read(sock, data, sizeof(buf));
+		err = sctp_recvmsg(sock,data,sizeof(data),
+				(struct sockaddr *)NULL,0,&sndrcvinfo,&flags);
 		if(err < 1){
 			break;
 		}
