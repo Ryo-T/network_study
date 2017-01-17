@@ -20,7 +20,7 @@
 
 // インターフェース関連
 #define MAXIF 10 // default 10
-#define HOW_MANY_IF 2
+#define HOW_MANY_IF 0
 //#define IF_LIST "lo0","lo0"
 #define IF_LIST "ens38","ens33"
 //#define WORDCOUNT 3,3
@@ -537,7 +537,7 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
         	        if_num = (if_num+1)%HOW_MANY_IF;
         	}
 
-     		printf("IF = %d\n",if_num);
+     		//printf("IF = %d\n",if_num);
 
 
 		// 終了
@@ -604,6 +604,11 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 
 	//printf("head->id:%u\n",head->next->id);
 
+	if(HOW_MANY_IF==2){
+		close(recv_sl[0].sock);
+		close(recv_sl[1].sock);
+	}
+
 	//再送用ソケットの開放
 	close(sl.sock);
 
@@ -616,8 +621,8 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 	// チェック配列のメモリの開放
 	free(ack_arr);
 
-//	return msgsize; 
-	return counter;
+	return msgsize; 
+//	return counter;
 }
 
 
@@ -651,22 +656,20 @@ int main(){
 		return 0;
 	}
 
-	//while(1){
 
-		memset(buf, '\0', sizeof(buf));
 
-		err = recvst(sock,buf,BUFFERSIZE,0);
 
-//		err = recv(sock, buf, sizeof(buf), 0);
+	memset(buf, '\0', sizeof(buf));
+	err = recvst(sock,buf,BUFFERSIZE,0);
 
-		if(err<0){
-			printf("recv err\n");
-		}
+//	err = recv(sock, buf, sizeof(buf), 0);
+	if(err<0){
+		printf("recv err\n");
+	}
 
 	printf("<<stream data>>\n%s\n", buf);
 	printf("data len = %d\n",err);
 
-	//}
 
 	free(buf);
 	close(sock);

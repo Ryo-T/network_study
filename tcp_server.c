@@ -69,6 +69,8 @@ int main(){
 
 	printf("%s\n", buf);
 
+	printf("size:%d\n",err);
+
 	/* TCPセッションの終了 */
 	close(sock);
 
