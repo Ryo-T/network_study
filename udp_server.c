@@ -4,36 +4,35 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 
-// 受信ポート
-#define PORT 8000
-#define PORT2 8001
-// 再送パケット送信ポート
-#define CPORT 8100
-#define CPORT2 8101
-// 再送パケット送信アドレス
-#define CADDRESS "192.168.211.134"
-#define CADDRESS2 "192.168.211.135"
 
 #define BUFFERSIZE 1024*1024*2
 #define MSGSIZE 9000
 #define KYE 200
+#define PORT 8000 // HOW_MANY_IF = 0
+
+// 受信ポート
+#define SPORT 8001,8002 // HOW_MANY_IF > 0
+// 再送パケット送信ポート
+#define CPORT 8100,8100,8100
+// 再送パケット送信アドレス
+#define CADDR "192.168.211.134","192.168.211.135","192.168.211.141"
 
 // インターフェース関連
 #define MAXIF 10 // default 10
-#define HOW_MANY_IF 0
+#define HOW_MANY_IF 2
 //#define IF_LIST "lo0","lo0"
-#define IF_LIST "ens38","ens33"
+#define IF_LIST "ens39","ens33","ens38"
 //#define WORDCOUNT 3,3
-#define WORDCOUNT 5,5
+#define WORDCOUNT 5,5,5
 
 // TIMEOUT関連
-#define TIMEOUT 1000
-#define STIMER 0//1秒
+#define TIMEOUT 5000
+#define SECTIMER 0//1秒
 #define NANOTIMER 10//ナノ秒
 
-#define __RE__TIMEOUT 1000
-#define __RE__STIMER 0//1秒
-#define __RE__NANOTIMER 10//ナノ秒
+#define __RE__TIMEOUT 100
+#define __RE__SECTIMER 0//1秒
+#define __RE__NANOTIMER 10//100000000000//ナノ秒
 
 void *memset(void *buf, int ch, size_t n);
 int close(int fd);
@@ -54,7 +53,7 @@ struct socklist{
 };
 
 // 再送先のアドレス設定
-struct socklist set_caddr(void){
+struct socklist set_caddr(int port,char *dev,int wcount,char *addr){
 	struct socklist sl;
 	static struct sockaddr_in addr2;
 
@@ -65,11 +64,14 @@ struct socklist set_caddr(void){
 	}
 
 	addr2.sin_family = AF_INET;
-	addr2.sin_port = htons(CPORT);
-	addr2.sin_addr.s_addr = inet_addr(CADDRESS);
+	addr2.sin_port = htons(port);
+	addr2.sin_addr.s_addr = inet_addr(addr);
 
  	sl.addr = (struct sockaddr *)&addr2;
  	sl.addr_len = sizeof(addr2);
+
+	if(dev!=NULL)
+		setsockopt(sl.sock, SOL_SOCKET, SO_BINDTODEVICE, dev, wcount);
 
  	return sl;
 }
@@ -114,7 +116,7 @@ void free_msglist(struct msglist *ml){
 		p = np;
 		np = np->next;
 
-		printf("free [id=%d]\n",p->id);
+//		printf("free [id=%d]\n",p->id);
 
 		free(p);
 
@@ -195,7 +197,7 @@ int do_recvst(int sock,struct msglist *front,unsigned int flag,uint8_t *ack_arr)
 	err = recv(sock, buf, sizeof(buf), MSG_DONTWAIT);
 	//err = recvfrom(recvsl->sock, recvbuf, sizeof(recvbuf), MSG_DONTWAIT,recvsl->addr, &recvsl->addr_len);
 	if(err<0){
-		printf("recvst err\n");
+//		printf("recvst err\n");
 		return 2;
 	}
 
@@ -305,6 +307,7 @@ int rq_resendst(struct socklist *sl,uint8_t *ack_arr,uint32_t ids){
 			//return err;
 		}
 
+
 		p = p + sizeof(uint8_t);
 	}
 
@@ -320,31 +323,31 @@ struct msghdr *get_resendst(int fd,struct msglist *tail,uint8_t *ack_arr){
 	int err = 0;
 	char buf[BUFFERSIZE];
 
-// タイマーでちょっと待ち
-//---------------------------------	
-//	int timeout = __RE__TIMEOUT;
-	struct timespec ts;		
-	ts.tv_sec = __RE__STIMER;
-	ts.tv_nsec = __RE__NANOTIMER;
-	nanosleep(&ts, NULL);
+// __RE__タイマー
+//---------------------------------
+        int rtimeout = __RE__TIMEOUT;
+        struct timespec rts;
+        rts.tv_sec = __RE__SECTIMER;
+        rts.tv_nsec = __RE__NANOTIMER;
 //---------------------------------
 
 	while(1){
 
-//		timeout--;
+		nanosleep(&rts,NULL);
+
 		memset(buf,'\0',sizeof(buf));
 
 		err = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
-/*
-		if(timeout<0){
-			printf("time out\n");
-			break;
-		}
-*/
+
+		if(rtimeout<0) break;
+
 		if(err<0){
-			//printf("packet wait\n");
-			break;
+			rtimeout--;
+			continue;
+			//break;
 		}
+
+		rtimeout = __RE__TIMEOUT;
 
 		mlp_next = rebuild_msglist(buf);
 		if(!mlp_next){
@@ -363,10 +366,10 @@ struct msghdr *get_resendst(int fd,struct msglist *tail,uint8_t *ack_arr){
 		uint8_t *p = ack_arr;
 		p = p + mlp_next->id;
 
-//		printf("get packet id is [%u]\n", mlp_next->id);
-//		printf("get packet len is [%u]\n", mlp_next->length);
-//		printf("get packet key is [%u]\n", mlp_next->key);
-//		printf("get packet len is [%s]\n", mlp_next->data);
+		printf("re:get id is [%u]\n", mlp_next->id);
+//		printf("re:get len is [%u]\n", mlp_next->length);
+//		printf("re:get key is [%u]\n", mlp_next->key);
+//		printf("re:get len is [%s]\n", mlp_next->data);
 
 		// 既に取得しているパケット
 		if(*p==1){
@@ -471,11 +474,13 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 	struct msglist *head;// first packet
 	struct msglist *last;// first packet
 	struct msglist *ml;
+        struct timeval s,e;
+
 // タイマー
 //-----------------------------
 	int timeout = TIMEOUT;
-	struct timespec ts;		
-	ts.tv_sec = STIMER;
+	struct timespec ts;
+	ts.tv_sec = SECTIMER;
 	ts.tv_nsec = NANOTIMER;
 //-----------------------------
 
@@ -488,23 +493,75 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 // 受信場所定義
 //--------------------------------------------
 	struct socklist recv_sl[MAXIF];
-	char *dev[HOW_MANY_IF] = {IF_LIST};
-	int wcount[HOW_MANY_IF] = {WORDCOUNT};
+	char *dev[MAXIF] = {IF_LIST};
+	int wcount[MAXIF] = {WORDCOUNT};
+	int sport[MAXIF] = {SPORT};
+	int i;
 
+	if(HOW_MANY_IF==0){
+		recv_sl[0].sock = fd;
+	}else{
+		for(i = 0;i<HOW_MANY_IF;i++){
+			recv_sl[i] = set_saddr(sport[i],dev[i],wcount[i]);
+			printf("sport=%d,dev=%s,wcount=%d\n",sport[i],dev[i],wcount[i]);
+		}
+	}
+
+/*
 	if(HOW_MANY_IF==0){
 		recv_sl[0].sock = fd;
 	}else if(HOW_MANY_IF == 2){
 		recv_sl[0] = set_saddr(PORT,dev[0],wcount[0]);
 		recv_sl[1] = set_saddr(PORT2,dev[1],wcount[1]);
 	}
+*/
+
 //--------------------------------------------
 
 // 再送先定義
 //--------------------------------------------
-	
-	struct socklist sl;
-	sl = set_caddr();
-	if(sl.sock<0) return -1;
+	char caddr[MAXIF][16] = {CADDR};
+	struct socklist re_sl[MAXIF];
+	int cport[MAXIF] = {CPORT};
+
+	if(HOW_MANY_IF==0){
+		re_sl[0] = set_caddr(cport[0],NULL,0,caddr[0]);
+		printf("cport=%d,dev=NULL,wc=0,caddr=%s\n",cport[0],caddr[0]);
+	}else{
+		for(i = 0;i<HOW_MANY_IF;i++){
+			re_sl[i] = set_caddr(cport[i],dev[i],wcount[i],caddr[i]);
+			printf("cport=%d,resenddev=%s,wc=%d,caddr=%s\n",cport[i],dev[i],wcount[i],caddr[i]);
+		}
+	}
+
+	if(re_sl[0].sock<0) return -1;
+
+//----------------------------------------------------
+	struct sockaddr_in addr0;
+	addr0.sin_family = AF_INET;
+	addr0.sin_port = htons(cport[0]);
+	addr0.sin_addr.s_addr = inet_addr(caddr[0]);
+	re_sl[0].addr = (struct sockaddr *)&addr0;
+	re_sl[0].addr_len = sizeof(addr0);
+	printf("caddr:%s\n",caddr[0]);
+
+        struct sockaddr_in addr1;
+        addr1.sin_family = AF_INET;
+        addr1.sin_port = htons(cport[0]);
+        addr1.sin_addr.s_addr = inet_addr(caddr[1]);
+        re_sl[1].addr = (struct sockaddr *)&addr1;
+        re_sl[1].addr_len = sizeof(addr1);
+        printf("caddr:%s\n",caddr[1]);
+
+        struct sockaddr_in addr2;
+        addr2.sin_family = AF_INET;
+        addr2.sin_port = htons(cport[0]);
+        addr2.sin_addr.s_addr = inet_addr(caddr[0]);
+        re_sl[2].addr = (struct sockaddr *)&addr2;
+        re_sl[2].addr_len = sizeof(addr2);
+        printf("caddr:%s\n",caddr[2]);
+
+//----------------------------------------------------
 
 //--------------------------------------------
 
@@ -527,11 +584,16 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 //---------------------
 	int if_num = 0;
 
+
+        // start timer
+        gettimeofday(&s,NULL);
+
+
 	// データ部受信
 	while(1){
 
-//		err = do_recvst(fd,ml,flag,ack_arr); //通常版
-		err = do_recvst(recv_sl[if_num].sock,ml,flag,ack_arr); //複数ポート版
+		err = do_recvst(fd,ml,flag,ack_arr); //通常版
+//		err = do_recvst(recv_sl[if_num].sock,ml,flag,ack_arr); //複数ポート版
 
 	        if(HOW_MANY_IF!=0){
         	        if_num = (if_num+1)%HOW_MANY_IF;
@@ -569,11 +631,14 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 //再送処理
 //----------------------------------------------------
 	long counter = 0;
+	if_num = 0;
 
 	while(1){
 
+		//printf("if_num = %d\n",if_num);
+
 		// 再送要求
-		err = rq_resendst(&sl,ack_arr,ids);
+		err = rq_resendst(&re_sl[if_num],ack_arr,ids);
 
 		if(err<0){
 			printf("rq_resendst err\n");
@@ -582,6 +647,8 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 
 		// 再送パケット受信
 		ml = get_resendst(fd,ml,ack_arr);
+//		ml = get_resendst(recv_sl[if_num].sock,ml,ack_arr);
+
 		// チェックリストの確認
 		err = check_ackarr(ack_arr,ids);
 
@@ -593,24 +660,37 @@ int recvst(int fd,void *ubuf, size_t size, unsigned int flag){
 			break;
 		}
 
+		if(HOW_MANY_IF!=0){
+                        if_num = (if_num+1)%HOW_MANY_IF;
+                }
+
 	}
 
 	// 終了
-	err = close_sendst(&sl);
+	err = close_sendst(&re_sl[0]);
 	//printf("close_sendst = %d\n",err );
+
+
+	// close timer
+        gettimeofday(&e,NULL);
+	printf("time = %f\n",(e.tv_sec-s.tv_sec)+(e.tv_usec - s.tv_usec)*1.0E-6);
+
 
 
 //----------------------------------------------------
 
 	//printf("head->id:%u\n",head->next->id);
 
-	if(HOW_MANY_IF==2){
-		close(recv_sl[0].sock);
-		close(recv_sl[1].sock);
+	for(i=0;i<=HOW_MANY_IF;i++){
+		close(recv_sl[i].sock);
 	}
 
 	//再送用ソケットの開放
-	close(sl.sock);
+	close(re_sl[0].sock);
+	for(i=1;i<HOW_MANY_IF;i++){
+		close(re_sl[i].sock);
+	}
+
 
 	// リストのデータのをまとめる
 	msgsize = collect_datas(ubuf,head,size);
@@ -632,6 +712,7 @@ int main(){
 	//char buf[BUFFERSIZE];
 	char *buf;
 	int err = 0;
+//	struct timeval s,e;
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -660,16 +741,28 @@ int main(){
 
 
 	memset(buf, '\0', sizeof(buf));
+
+
+
+	// start timer
+//	gettimeofday(&s,NULL);
+
 	err = recvst(sock,buf,BUFFERSIZE,0);
+
+	// close timer
+//	gettimeofday(&e,NULL);
+
+
 
 //	err = recv(sock, buf, sizeof(buf), 0);
 	if(err<0){
 		printf("recv err\n");
 	}
 
-	printf("<<stream data>>\n%s\n", buf);
+//	printf("<<stream data>>\n%s\n", buf);
 	printf("data len = %d\n",err);
 
+//	printf("time = %f\n",(e.tv_sec-s.tv_sec)+(e.tv_usec - s.tv_usec)*1.0E-6);
 
 	free(buf);
 	close(sock);

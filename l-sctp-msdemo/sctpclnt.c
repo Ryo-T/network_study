@@ -17,6 +17,9 @@
 #include <netinet/sctp.h>
 #include <arpa/inet.h>
 #include "common.h"
+#include <sys/time.h>
+
+#define BUFSIZE 1024*1024
 
 int main()
 {
@@ -26,15 +29,17 @@ int main()
   struct sctp_sndrcvinfo sndrcvinfo;
   struct sctp_event_subscribe events;
   struct sctp_initmsg initmsg;
-  char buffer[MAX_BUFFER+1];
-
+  //char buffer[MAX_BUFFER+1];
+  char buf[BUFSIZE];
+  struct timeval s, e;
+ 
   /* Create an SCTP TCP-Style Socket */
   connSock = socket( AF_INET, SOCK_STREAM, IPPROTO_SCTP );
 
   /* Specify that a maximum of 5 streams will be available per socket */
   memset( &initmsg, 0, sizeof(initmsg) );
-  initmsg.sinit_num_ostreams = 5;
-  initmsg.sinit_max_instreams = 5;
+  initmsg.sinit_num_ostreams = 9;
+  initmsg.sinit_max_instreams = 9;
   initmsg.sinit_max_attempts = 4;
   ret = setsockopt( connSock, IPPROTO_SCTP, SCTP_INITMSG,
                      &initmsg, sizeof(initmsg) );
@@ -42,7 +47,7 @@ int main()
   /* Specify the peer endpoint to which we'll connect */
   bzero( (void *)&servaddr, sizeof(servaddr) );
   servaddr.sin_family = AF_INET;
-  servaddr.sin_port = htons(MY_PORT_NUM);
+  servaddr.sin_port = htons(8000);
   servaddr.sin_addr.s_addr = inet_addr( "127.0.0.1" );
 
   /* Connect to the server */
@@ -66,21 +71,29 @@ int main()
 
   /* Expect two messages from the peer */
 
-  for (i = 0 ; i < 2 ; i++) {
 
-    in = sctp_recvmsg( connSock, (void *)buffer, sizeof(buffer),
+  gettimeofday(&s, NULL);
+
+
+  while(1){
+
+    in = sctp_recvmsg( connSock, (void *)buf, sizeof(buf),
                         (struct sockaddr *)NULL, 0, &sndrcvinfo, &flags );
+	printf("in = %d\n",in);
 
     if (in > 0) {
-      buffer[in] = 0;
-      if (sndrcvinfo.sinfo_stream == LOCALTIME_STREAM) {
-        printf("(Local) %s\n", buffer);
-      } else if (sndrcvinfo.sinfo_stream == GMT_STREAM) {
-        printf("(GMT  ) %s\n", buffer);
-      }
+	buf[in] = 0;
+	//printf("data:\n%s",buf);
+    }else{
+	break;
     }
 
-  }
+ }
+
+
+  gettimeofday(&e, NULL);
+  printf("time = %lf\n", (e.tv_sec - s.tv_sec) + (e.tv_usec - s.tv_usec)*1.0E-6);
+
 
   /* Close our socket and exit */
   close(connSock);
